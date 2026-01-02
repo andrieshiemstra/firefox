@@ -131,7 +131,8 @@ def generate(output, node_script, *files):
         print(ALLOWLIST_ERROR % (node_script), file=sys.stderr)
         sys.exit(1)
 
-    node_cmd_list = [node_interpreter, node_script]
+    # node_cmd_list = [node_interpreter, node_script]
+    node_cmd_list = ["qjs", "--std", node_script]
     node_cmd_list.extend(files)
 
     return execute_node_cmd(node_cmd_list)

@@ -10,6 +10,143 @@
 
 "use strict";
 
+const isQuickJS = typeof require === 'undefined';
+if (isQuickJS) {
+
+
+    globalThis.__filename = scriptArgs[0];
+    globalThis.__dirname = __filename.substring(0, __filename.lastIndexOf('/'));
+
+    globalThis.process = {
+        argv: ['quickjs', __filename, ...scriptArgs],
+    };
+
+    const moduleCache = {};
+    // Custom fs and path implementations for QuickJS
+    const builtinModules = {
+        fs: {
+            readFileSync: function(filePath) {
+                const content = std.loadFile(filePath);
+                if (content === null) {
+                    throw new Error(`Failed to read file: ${filePath}`);
+                }
+                return content;
+            },
+            writeFileSync: function(filePath, data) {
+                const fd = os.open(filePath, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o666);
+                const errorObj = {};
+                const f = std.fdopen(fd, 'w', errorObj);
+                if (!f) {
+                    throw new Error(`Failed to open file for writing: ${errorObj.errno}`);
+                }
+
+                try {
+                    // Use puts to write the string directly
+                    f.puts(data);
+                    f.close();
+                } catch (e) {
+                    os.close(fd);
+                    throw new Error(`Failed to write to file: ${filePath}`);
+                }
+
+                // Close the file
+                os.close(fd);
+            },
+            existsSync: function(filePath) {
+                const [realPath, err] = os.realpath(filePath);
+                return err === 0; // If err is 0, the path exists
+            },
+            mkdirSync: function(filePath) {
+                const [realPath, err] = os.realpath(filePath);
+                if (err === 0) {
+                    const e = new Error("exists");
+                    e["code"] = "EEXIST";
+                    throw e;
+                }
+                const result = os.mkdir(filePath, 0o777);
+                if (result < 0) {
+                    throw new Error(`Failed to create directory: ${filePath}`);
+                }
+            },
+        },
+        path: {
+            join: (...args) => args.join('/').replace(/\/+/g, '/'),
+            dirname: (filePath) => filePath.substring(0, filePath.lastIndexOf('/')),
+            basename: (filePath) => filePath.split('/').pop(),
+            resolve: function(...segments) {
+                let resolvedPath = '';
+
+                for (let i = 0; i < segments.length; i++) {
+                    const segment = segments[i];
+
+                    if (segment === '') {
+                        continue;
+                    }
+
+                    // If the segment is an absolute path, reset resolvedPath
+                    if (segment.charAt(0) === '/') {
+                        resolvedPath = segment;
+                    } else {
+                        // Join the segment to the resolvedPath
+                        resolvedPath = this.join(resolvedPath, segment);
+                    }
+                }
+
+                return resolvedPath || '/';
+            }
+        }
+    };
+
+    // Simple require function for QuickJS
+    globalThis.require = function(path) {
+
+        // Handle built-in modules (fs, path)
+        if (builtinModules[path]) {
+            return builtinModules[path];
+        }
+
+        // Resolve the full path (handle relative paths)
+        if (!path.endsWith(".js")) {
+            path += ".js";
+        }
+        const fullPath = path.startsWith('.')
+            ? __dirname + '/' + path.substring(2)
+            : path;
+
+
+
+        // Return cached module if available
+        if (moduleCache[fullPath]) {
+            return moduleCache[fullPath];
+        }
+
+        // Read the file
+        const code = std.loadFile(fullPath, "utf8");
+
+        // Wrap the code to capture exports
+        const wrappedCode = `
+            (function() {
+                const exports = {};
+                const module = {exports};
+                ${code}
+                return module.exports;
+            })()
+        `;
+
+        // Evaluate the wrapped code
+        try {
+            const moduleFn = std.evalScript(wrappedCode);
+
+            // Cache and return the module
+            moduleCache[fullPath] = moduleFn;
+            return moduleFn;
+        } catch(ex) {
+            throw new Error("require failed with " + ex.message + " stack: " + ex.stack);
+        }
+
+    }
+}
+
 // eslint-disable-next-line mozilla/reject-relative-requires
 const Babel = require("./babel");
 const fs = require("fs");
