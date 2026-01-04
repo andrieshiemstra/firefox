@@ -57,16 +57,23 @@ if (isQuickJS) {
                 return err === 0; // If err is 0, the path exists
             },
             mkdirSync: function(filePath) {
-                const [realPath, err] = os.realpath(filePath);
-                if (err === 0) {
-                    const e = new Error("exists");
-                    e["code"] = "EEXIST";
-                    throw e;
-                }
                 const result = os.mkdir(filePath, 0o777);
-                if (result < 0) {
-                    throw new Error(`Failed to create directory: ${filePath}`);
-                }
+                    if (result < 0) {
+                        const errno = -result;
+                        let code, message;
+                        switch (errno) {
+                            case 1:  code = "EPERM"; message = "Operation not permitted"; break;
+                            case 2:  code = "ENOENT"; message = "No such file or directory"; break;
+                            case 13: code = "EACCES"; message = "Permission denied"; break;
+                            case 17: code = "EEXIST"; message = "File exists"; break;
+                            case 20: code = "ENOTDIR"; message = "Not a directory"; break;
+                            case 36: code = "ENAMETOOLONG"; message = "File name too long"; break;
+                            default: code = "UNKNOWN"; message = "Unknown error"; break;
+                        }
+                        const e = new Error(`Failed to create directory (${message}): ${filePath}`);
+                        e.code = code;
+                        throw e;
+                    }
             },
         },
         path: {
